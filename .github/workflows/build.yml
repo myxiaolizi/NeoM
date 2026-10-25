@@ -1,0 +1,489 @@
+name: build
+
+# NeoM multi-platform build & release.
+#
+# Triggers
+#   push tag v*        -> full build + GitHub Release + OSS upload + backend registration
+#   push to main/dev   -> build + upload artifacts only (no release)
+#   workflow_dispatch  -> manual, choose targets
+#
+# Artifacts end up in release/<platform>/ on every runner and are uploaded either
+# as workflow artifacts or attached to the GitHub Release.
+#
+# Required secrets (never written into the repo):
+#   OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_BUCKET / OSS_REGION
+#   NEOM_ADMIN_TOKEN
+#   ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
+#   APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_CERT_P12_BASE64 / APPLE_CERT_PASSWORD
+#   WIN_CERT_PFX_BASE64 / WIN_CERT_PASSWORD   (optional Windows code signing)
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main, master, dev]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Space separated: web win mac android ios'
+        required: false
+        default: 'web win mac android ios'
+      publish:
+        description: 'Upload to OSS and register releases'
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  NEOM_API_BASE: https://m.zhengl.vip
+
+jobs:
+  # ===========================================================================
+  # 1. Web bundle — the only shared input for every platform.
+  # ===========================================================================
+  web:
+    name: web bundle
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - id: ver
+        run: echo "version=$(node -p "require('./web/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Install & build web
+        run: |
+          cd web
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          VITE_API_BASE=${{ env.NEOM_API_BASE }} npm run build
+
+      - name: Verify bundle
+        run: |
+          test -f web/dist/index.html || { echo "web/dist/index.html missing"; exit 1; }
+          du -sh web/dist
+          ls -la web/dist/assets | head -20
+
+      # Everything downstream consumes this prebuilt bundle, so the desktop and
+      # mobile jobs never need to rebuild the frontend.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  # ===========================================================================
+  # 2. Windows — NSIS installer + green zip + portable exe
+  # ===========================================================================
+  windows:
+    name: windows x64
+    needs: web
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.targets, 'win')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Stage web bundle
+        working-directory: desktop
+        run: node prepare-web.mjs --strict
+
+      - name: Generate icons
+        run: node scripts/make-icons.mjs
+
+      - name: Build Windows targets
+        working-directory: desktop
+        env:
+          NEOM_OUT_DIR: ${{ github.workspace }}/release/win-x64
+          NEOM_UPDATE_URL: https://mdadmin.zhengl.vip/md/mdadmin/
+          CSC_LINK: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+        run: npx electron-builder --config builder.config.js --win --x64
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem release/win-x64 -File |
+            Where-Object { $_.Extension -in '.exe', '.zip' } |
+            ForEach-Object {
+              $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+              "$h  $($_.Name)" | Out-File -Append -Encoding utf8 release/win-x64/SHA256SUMS.txt
+            }
+          Get-Content release/win-x64/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neom-windows-${{ needs.web.outputs.version }}
+          path: |
+            release/win-x64/*.exe
+            release/win-x64/*.zip
+            release/win-x64/*.yml
+            release/win-x64/*.blockmap
+            release/win-x64/SHA256SUMS.txt
+          retention-days: 30
+
+  # ===========================================================================
+  # 3. macOS — dmg + zip for arm64 and x64
+  # ===========================================================================
+  macos:
+    name: macos universal
+    needs: web
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.targets, 'mac')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install desktop deps
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+
+      - name: Stage web bundle
+        working-directory: desktop
+        run: node prepare-web.mjs --strict
+
+      - name: Generate icons
+        run: node scripts/make-icons.mjs
+
+      - name: Import signing certificate (optional)
+        if: ${{ secrets.APPLE_CERT_P12_BASE64 != '' }}
+        env:
+          CERT_B64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: |
+          echo "$CERT_B64" | base64 --decode > /tmp/neom.p12
+          security create-keychain -p neom build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p neom build.keychain
+          security import /tmp/neom.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k neom build.keychain
+          rm -f /tmp/neom.p12
+
+      - name: Build macOS targets
+        working-directory: desktop
+        env:
+          NEOM_OUT_DIR: ${{ github.workspace }}/release/mac
+          NEOM_UPDATE_URL: https://mdadmin.zhengl.vip/md/mdadmin/
+          CSC_LINK: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARIZE: ${{ secrets.APPLE_ID != '' }}
+        run: |
+          npx electron-builder --config builder.config.js --mac --arm64 --x64 || \
+          npx electron-builder --config builder.config.js --mac
+
+      - name: Checksums
+        run: |
+          cd release/mac
+          shasum -a 256 *.dmg *.zip 2>/dev/null | tee SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neom-macos-${{ needs.web.outputs.version }}
+          path: |
+            release/mac/*.dmg
+            release/mac/*.zip
+            release/mac/*.yml
+            release/mac/*.blockmap
+            release/mac/SHA256SUMS.txt
+          retention-days: 30
+
+  # ===========================================================================
+  # 4. Android — apk + aab
+  # ===========================================================================
+  android:
+    name: android
+    needs: web
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.targets, 'android')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install mobile deps
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: Generate Android project (first run only)
+        working-directory: mobile
+        run: |
+          if [ ! -d android/app ]; then npx cap add android; fi
+          node prepare-web.mjs --strict
+
+      - name: Overlay maintained native files
+        run: |
+          cp mobile/android/app/src/main/AndroidManifest.xml mobile/android/app/src/main/AndroidManifest.xml
+          bash scripts/sync-mobile-native.sh android || true
+
+      - name: Sync Capacitor
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: Configure signing
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: mobile/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > keystore.jks
+          cat > keystore.properties <<EOF
+          storeFile=keystore.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      - name: Build apk + aab
+        working-directory: mobile/android
+        run: |
+          chmod +x ./gradlew
+          if [ -f keystore.jks ]; then
+            ./gradlew assembleRelease bundleRelease --no-daemon
+          else
+            echo "::warning::No keystore secret — building debug apk only"
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p release/android
+          V=$(node -p "require('./mobile/package.json').version")
+          find mobile/android/app/build/outputs -name '*.apk' -exec cp {} "release/android/NeoM-$V-android.apk" \;
+          find mobile/android/app/build/outputs -name '*.aab' -exec cp {} "release/android/NeoM-$V-android.aab" \;
+          ls -la release/android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neom-android-${{ needs.web.outputs.version }}
+          path: release/android/*
+          retention-days: 30
+
+  # ===========================================================================
+  # 5. iOS — ipa (unsigned on PRs, signed when Apple secrets are present)
+  # ===========================================================================
+  ios:
+    name: ios
+    needs: web
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.targets, 'ios')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+
+      - name: Install mobile deps
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: Generate iOS project (first run only)
+        working-directory: mobile
+        run: |
+          if [ ! -d ios/App ]; then npx cap add ios; fi
+          node prepare-web.mjs --strict
+
+      - name: Merge Info.plist keys
+        run: |
+          PLIST=mobile/ios/App/App/Info.plist
+          if [ -f "$PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Merge mobile/ios/App/App/Info.plist" "$PLIST" || true
+            plutil -lint "$PLIST"
+          fi
+
+      - name: Sync Capacitor
+        working-directory: mobile
+        run: |
+          npx cap sync ios
+          cd ios/App && pod install
+
+      - name: Build (unsigned archive)
+        working-directory: mobile/ios/App
+        run: |
+          xcodebuild -workspace App.xcworkspace -scheme App \
+            -configuration Release -sdk iphoneos \
+            -archivePath build/NeoM.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Export ipa
+        working-directory: mobile/ios/App
+        run: |
+          mkdir -p build/ipa
+          cp -R build/NeoM.xcarchive/Products/Applications/App.app build/ipa/ 2>/dev/null || true
+          mkdir -p build/ipa/Payload
+          cp -R build/NeoM.xcarchive/Products/Applications/*.app build/ipa/Payload/ 2>/dev/null || true
+          cd build/ipa && zip -qry "$GITHUB_WORKSPACE/release/ios/NeoM-ios.ipa" Payload || true
+        continue-on-error: true
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p release/ios
+          V=$(node -p "require('./mobile/package.json').version")
+          if [ -f release/ios/NeoM-ios.ipa ]; then mv release/ios/NeoM-ios.ipa "release/ios/NeoM-$V-ios.ipa"; fi
+          cp -R mobile/ios/App/build/NeoM.xcarchive release/ios/NeoM.xcarchive 2>/dev/null || true
+          ls -la release/ios
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neom-ios-${{ needs.web.outputs.version }}
+          path: release/ios/*
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # 6. Publish — OSS upload + backend release registration + GitHub Release
+  # ===========================================================================
+  publish:
+    name: publish
+    needs: [web, windows, macos, android, ios]
+    if: |
+      always() &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true')) &&
+      !cancelled()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Flatten into release/
+        run: |
+          mkdir -p release/win-x64 release/mac release/android release/ios
+          [ -d staging/neom-windows-* ] && cp -r staging/neom-windows-*/* release/win-x64/ 2>/dev/null || true
+          [ -d staging/neom-macos-* ]   && cp -r staging/neom-macos-*/*   release/mac/     2>/dev/null || true
+          [ -d staging/neom-android-* ] && cp -r staging/neom-android-*/* release/android/ 2>/dev/null || true
+          [ -d staging/neom-ios-* ]     && cp -r staging/neom-ios-*/*     release/ios/     2>/dev/null || true
+          find release -type f | sort
+
+      - name: Install ali-oss
+        run: npm install --no-save ali-oss
+
+      - name: Upload to OSS
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_REGION: ${{ secrets.OSS_REGION }}
+          OSS_PREFIX: md/mdadmin/
+          OSS_PUBLIC_BASE: https://mdadmin.zhengl.vip
+        run: node scripts/upload-oss.mjs
+
+      - name: Register releases in backend
+        env:
+          NEOM_ADMIN_TOKEN: ${{ secrets.NEOM_ADMIN_TOKEN }}
+          NEOM_API_BASE: ${{ env.NEOM_API_BASE }}
+        run: node scripts/publish-release.mjs --channel stable
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: NeoM ${{ needs.web.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          generate_release_notes: true
+          files: |
+            release/win-x64/*.exe
+            release/win-x64/*.zip
+            release/mac/*.dmg
+            release/mac/*.zip
+            release/android/*.apk
+            release/android/*.aab
+            release/ios/*.ipa
+
+      - name: Summary
+        run: |
+          {
+            echo "### NeoM ${{ needs.web.outputs.version }} published"
+            echo ""
+            echo "| file | size |"
+            echo "|---|---|"
+            find release -type f -exec du -h {} \; | sed 's/^/| /;s/\t/ | /' | sed 's/$/ |/'
+          } >> "$GITHUB_STEP_SUMMARY"

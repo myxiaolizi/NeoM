@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="NeoM">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2f6fed"/>
+      <stop offset="100%" stop-color="#6aa6ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230" fill="url(#g)"/>
+  <g fill="#ffffff">
+    <path d="M322.6 281.6 L409.6 281.6 L409.6 742.4 L322.6 742.4 Z"/>
+    <path d="M614.4 281.6 L701.4 281.6 L701.4 742.4 L614.4 742.4 Z"/>
+    <path d="M353.0 281.6 L440.1 281.6 L671.0 742.4 L583.9 742.4 Z"/>
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+{
+  "name": "neom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NeoM — Obsidian-like, Win11-styled, AI-native Markdown editor for every platform.",
+  "scripts": {
+    "dev:web": "npm --prefix web run dev",
+    "dev:server": "npm --prefix server run dev",
+    "build": "npm --prefix web run build",
+    "start": "npm --prefix server start",
+    "typecheck": "npm --prefix web run typecheck",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:build:win": "npm --prefix desktop run build:win",
+    "desktop:build:mac": "npm --prefix desktop run build:mac",
+    "mobile:sync": "npm --prefix mobile run sync",
+    "mobile:apk": "npm --prefix mobile run build:apk"
+  }
+}

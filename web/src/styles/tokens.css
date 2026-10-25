@@ -1,0 +1,165 @@
+/* ===========================================================
+   NeoM design tokens — Win11 Fluent inspired, Obsidian structure
+   =========================================================== */
+:root {
+  color-scheme: light;
+
+  /* Brand */
+  --brand: #2f6fed;
+  --brand-2: #6f5bf0;
+  --brand-gradient: linear-gradient(135deg, #2f6fed 0%, #6f5bf0 55%, #b44df0 100%);
+
+  /* Surfaces */
+  --bg-app: #eceef3;
+  --bg-app-glow-1: radial-gradient(1200px 600px at 12% -10%, rgba(47, 111, 237, 0.14), transparent 60%);
+  --bg-app-glow-2: radial-gradient(900px 500px at 100% 0%, rgba(180, 77, 240, 0.10), transparent 55%);
+  --bg-editor: #ffffff;
+  --surface: rgba(255, 255, 255, 0.74);
+  --surface-solid: #ffffff;
+  --surface-2: rgba(246, 247, 250, 0.86);
+  --surface-3: rgba(0, 0, 0, 0.028);
+  --surface-hover: rgba(0, 0, 0, 0.045);
+  --surface-active: rgba(47, 111, 237, 0.10);
+  --surface-elevated: rgba(252, 252, 254, 0.92);
+
+  /* Text */
+  --text: #191b20;
+  --text-2: #565d6c;
+  --text-3: #8a91a0;
+  --text-invert: #ffffff;
+
+  /* Lines */
+  --border: rgba(16, 20, 30, 0.075);
+  --border-strong: rgba(16, 20, 30, 0.14);
+  --border-focus: rgba(47, 111, 237, 0.55);
+
+  /* Accent */
+  --accent: #2f6fed;
+  --accent-hover: #1f5fdd;
+  --accent-soft: rgba(47, 111, 237, 0.10);
+  --accent-soft-2: rgba(47, 111, 237, 0.18);
+
+  /* Semantic */
+  --ok: #0f7b3f;
+  --ok-soft: rgba(15, 123, 63, 0.12);
+  --warn: #9a5b00;
+  --warn-soft: rgba(196, 123, 0, 0.14);
+  --danger: #c2262f;
+  --danger-soft: rgba(194, 38, 47, 0.12);
+  --info: #2459c9;
+
+  /* Effects */
+  --shadow-1: 0 1px 2px rgba(10, 14, 22, 0.06), 0 2px 8px rgba(10, 14, 22, 0.045);
+  --shadow-2: 0 10px 30px rgba(10, 14, 22, 0.13), 0 2px 8px rgba(10, 14, 22, 0.07);
+  --shadow-3: 0 24px 70px rgba(10, 14, 22, 0.24);
+  --blur: saturate(170%) blur(26px);
+
+  /* Geometry */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* Layout */
+  --tabbar-h: 40px;
+  --toolbar-h: 42px;
+  --status-h: 27px;
+  --ribbon-w: 46px;
+  --sidebar-w: 272px;
+  --right-w: 336px;
+  --titlebar-h: 0px;
+
+  /* Typography */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "Courier New", monospace;
+  --font-serif: "Source Serif Pro", "Songti SC", Georgia, "Times New Roman", serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+
+  /* Editor page width */
+  --page-width: 760px;
+  --editor-line-height: 1.75;
+
+  --z-menu: 1000;
+  --z-modal: 1100;
+  --z-toast: 1200;
+  --z-popover: 900;
+  --transition: 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-app: #121318;
+  --bg-app-glow-1: radial-gradient(1200px 600px at 10% -10%, rgba(47, 111, 237, 0.20), transparent 60%);
+  --bg-app-glow-2: radial-gradient(900px 500px at 100% 0%, rgba(150, 70, 240, 0.16), transparent 55%);
+  --bg-editor: #1a1b21;
+  --surface: rgba(31, 33, 40, 0.74);
+  --surface-solid: #212329;
+  --surface-2: rgba(39, 41, 49, 0.72);
+  --surface-3: rgba(255, 255, 255, 0.035);
+  --surface-hover: rgba(255, 255, 255, 0.06);
+  --surface-active: rgba(111, 157, 255, 0.16);
+  --surface-elevated: rgba(38, 40, 48, 0.96);
+
+  --text: #e9ebf1;
+  --text-2: #a8aebb;
+  --text-3: #767d8c;
+  --text-invert: #0f1116;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-focus: rgba(111, 157, 255, 0.6);
+
+  --accent: #6f9dff;
+  --accent-hover: #8bb1ff;
+  --accent-soft: rgba(111, 157, 255, 0.14);
+  --accent-soft-2: rgba(111, 157, 255, 0.24);
+
+  --ok: #4cc27b;
+  --ok-soft: rgba(76, 194, 123, 0.14);
+  --warn: #e0a83a;
+  --warn-soft: rgba(224, 168, 58, 0.16);
+  --danger: #ff6b73;
+  --danger-soft: rgba(255, 107, 115, 0.14);
+  --info: #7ea6ff;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 28px 80px rgba(0, 0, 0, 0.6);
+  --blur: saturate(160%) blur(26px);
+}
+
+/* Obsidian-like extra palettes for code/markdown */
+:root {
+  --code-bg: #f4f5f8;
+  --code-border: rgba(16, 20, 30, 0.08);
+  --quote-border: #cfd6e4;
+  --table-border: rgba(16, 20, 30, 0.12);
+  --hl-bg: #fff2a8;
+  --tag-bg: rgba(47, 111, 237, 0.10);
+  --tag-text: #2358b8;
+  --link: #2358b8;
+  --callout-note: #2f6fed;
+  --callout-tip: #0f7b3f;
+  --callout-warn: #c47b00;
+  --callout-danger: #c2262f;
+  --callout-info: #0e7490;
+  --selection: rgba(47, 111, 237, 0.20);
+}
+html[data-theme='dark'] {
+  --code-bg: #23252d;
+  --code-border: rgba(255, 255, 255, 0.08);
+  --quote-border: #3a3f4b;
+  --table-border: rgba(255, 255, 255, 0.13);
+  --hl-bg: rgba(255, 214, 74, 0.28);
+  --tag-bg: rgba(111, 157, 255, 0.16);
+  --tag-text: #a9c4ff;
+  --link: #8fb4ff;
+  --selection: rgba(111, 157, 255, 0.26);
+}

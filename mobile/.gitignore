@@ -1,0 +1,30 @@
+# Capacitor platform projects are generated (`npx cap add android|ios`).
+# The maintained native overrides live under android/app/src/main/ and
+# ios/App/App/Info.plist — see scripts/sync-mobile-native.*
+android/app/
+android/build/
+android/gradle/
+android/gradlew
+android/gradlew.bat
+android/local.properties
+android/*.iml
+android/.gradle/
+android/keystore.properties
+android/*.jks
+android/*.keystore
+
+ios/App/Pods/
+ios/App/Podfile.lock
+ios/App/build/
+ios/App/App.xcworkspace
+ios/App/App.xcodeproj/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/ExportOptions.plist
+ios/App/*.xcarchive
+
+# Installed dependencies / generated state
+node_modules/
+package-lock.json
+build-stamp.json
+*.log

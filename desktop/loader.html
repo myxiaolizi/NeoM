@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>NeoM</title>
+    <style>
+      :root { color-scheme: light dark; --accent: #2f6fed; }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: grid; place-items: center;
+        font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, -apple-system, sans-serif;
+        background: radial-gradient(1200px 800px at 20% 0%, #eaf0ff 0%, #f6f7fb 45%, #eef1f7 100%);
+        color: #1b1f27;
+      }
+      /* The whole shell is draggable; the card stays interactive. */
+      body { -webkit-app-region: drag; }
+      .card {
+        -webkit-app-region: no-drag;
+        width: min(560px, 88vw); padding: 34px 34px 28px; border-radius: 16px;
+        background: rgba(255, 255, 255, 0.82); backdrop-filter: blur(20px);
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        box-shadow: 0 18px 50px -18px rgba(15, 23, 42, 0.28);
+      }
+      .logo {
+        width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center;
+        color: #fff; font-weight: 700; font-size: 26px; letter-spacing: -1px;
+        background: linear-gradient(135deg, #2f6fed, #6aa6ff);
+      }
+      h1 { font-size: 20px; margin: 18px 0 6px; }
+      p { margin: 0 0 12px; line-height: 1.7; font-size: 13.5px; color: #4b5563; }
+      code {
+        font-family: "Cascadia Code", Consolas, monospace; font-size: 12px;
+        background: #eef2f9; padding: 2px 6px; border-radius: 6px; display: inline-block;
+      }
+      ol { margin: 10px 0 0; padding-left: 20px; font-size: 13px; line-height: 2; color: #374151; }
+      .badge { display: inline-flex; align-items: center; gap: 6px; margin-top: 18px; font-size: 12px; color: #8a93a5; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; }
+      @media (prefers-color-scheme: dark) {
+        body { background: radial-gradient(1200px 800px at 20% 0%, #131a26 0%, #0e131b 55%, #0b0f16 100%); color: #e7ebf3; }
+        .card { background: rgba(23, 30, 42, 0.82); border-color: rgba(255, 255, 255, 0.08); }
+        p { color: #9aa6b8; }
+        code { background: #1b2431; color: #cbd6e6; }
+        ol { color: #b9c4d4; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">N</div>
+      <h1>桌面端已启动，但网页资源尚未构建</h1>
+      <p>
+        当前安装包内没有 <code>web/dist</code> 产物（打包时前端构建未完成），因此只能显示此占位页面。
+        桌面外壳本身工作正常：本地文件、窗口控制、文件关联、自动更新等能力均可用。
+      </p>
+      <ol>
+        <li>在仓库根目录执行 <code>npm --prefix web install</code></li>
+        <li>执行 <code>npm --prefix web run build</code></li>
+        <li>重新打包：<code>npm --prefix desktop run build:win</code></li>
+      </ol>
+      <div class="badge"><span class="dot"></span><span id="stamp">NeoM Desktop · renderer fallback</span></div>
+    </div>
+    <script>
+      // Proves that preload -> IPC -> main is wired up in this build.
+      window.addEventListener('DOMContentLoaded', async function () {
+        try {
+          if (window.neom && window.neom.setTitle) window.neom.setTitle('NeoM')
+          if (window.neom && window.neom.app && window.neom.app.info) {
+            var info = await window.neom.app.info()
+            document.getElementById('stamp').textContent =
+              'NeoM Desktop ' + info.version + ' · ' + info.platform + '-' + info.arch + ' · Electron ' + info.electron
+          }
+        } catch (e) {}
+      })
+    </script>
+  </body>
+</html>

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>NeoM bridge smoke test</title>
+<style>
+  body { font: 13px/1.65 ui-monospace, Consolas, monospace; padding: 18px; background: #0e131b; color: #d6e2f5; }
+  pre { white-space: pre-wrap; margin: 0; }
+  .ok { color: #6ee7a8; }
+</style>
+</head>
+<body>
+<pre id="out">running bridge checks…</pre>
+<script>
+/**
+ * Bridge smoke test — proves the packaged Electron shell works end to end.
+ *
+ * Run it with:  pwsh scripts/smoke-desktop.ps1
+ * (or manually: stage this file as desktop/app-web/index.html and launch electron)
+ *
+ * It exercises, in order:
+ *   1. window.neom presence + platform/apiBase globals
+ *   2. the full LocalFileApi surface (contract parity)
+ *   3. fs round-trip over IPC (create/write/read/rename/move/readDir/delete)
+ *   4. JSON store persistence
+ *   5. recentVaults shape
+ *   6. app:// static serving, SPA fallback, 404 for missing assets
+ *   7. the app:// -> backend API reverse proxy (/api/health)
+ *   8. window controls (maximize/restore) + app.info
+ *   9. .md association detection (read-only; never mutates the registry)
+ *  10. update check (network failures are tolerated)
+ *
+ * The result is written to <temp>/neom-bridge-report.txt so a runner script can
+ * assert on it without screen scraping.
+ */
+const out = []
+const el = document.getElementById('out')
+const say = (k, v) => { out.push(k + ': ' + v); el.textContent = out.join('\n') }
+const api = window.neom
+
+async function main() {
+  /* ---------------------------------------------------------- 1. globals */
+  say('bridge.isDesktop', !!api && api.isDesktop)
+  say('bridge.platform', api && api.platform)
+  say('bridge.apiBase', JSON.stringify(api && api.apiBase))
+  say('global.__NEOM_API_BASE__', JSON.stringify(window.__NEOM_API_BASE__))
+  say('global.__NEOM_REMOTE_API_BASE__', JSON.stringify(window.__NEOM_REMOTE_API_BASE__))
+
+  const info = await api.app.info()
+  say('app.version', info.version)
+  say('app.electron', info.electron)
+  say('app.isPackaged', info.isPackaged)
+
+  /* ------------------------------------------- 2. LocalFileApi parity */
+  const required = [
+    'openVault', 'readDir', 'readFile', 'writeFile', 'deleteFile', 'createDir',
+    'rename', 'move', 'revealInFolder', 'openPath', 'setTitle', 'associateMd',
+    'isMdAssociated', 'onOpenFile', 'recentVaults', 'store', 'update'
+  ]
+  const missing = required.filter((k) => !(k in api.local))
+  say('local.missingKeys', missing.length ? missing.join(',') : 'NONE')
+  say('local.store.shape', ['get', 'set'].every((k) => typeof api.local.store[k] === 'function') ? 'ok' : 'BAD')
+  say('local.update.shape', ['check', 'download', 'install'].every((k) => typeof api.local.update[k] === 'function') ? 'ok' : 'BAD')
+  say('window.controls', ['minimize', 'maximize', 'close', 'isMaximized'].every((k) => typeof api.window[k] === 'function') ? 'ok' : 'BAD')
+
+  /* ------------------------------------------------ 3. fs round-trip */
+  const TMP = info.paths.temp + '/neom-smoke-' + Date.now()
+  try {
+    say('fs.createDir', await api.local.createDir(TMP))
+    say('fs.writeFile', await api.local.writeFile(TMP + '/note.md', '# hello\n中文内容 ✓ CJK roundtrip'))
+    const content = await api.local.readFile(TMP + '/note.md')
+    say('fs.readFile.utf8', content.includes('中文内容 ✓') ? 'ok' : 'CORRUPTED: ' + JSON.stringify(content))
+
+    const entries = await api.local.readDir(TMP)
+    const e0 = (entries || []).find((e) => e.name === 'note.md')
+    say('fs.readDir', e0 ? 'ok (size=' + e0.size + ')' : 'MISSING ENTRY')
+    say('fs.entry.shape', e0 && ['name', 'path', 'isDir', 'size', 'mtime', 'ctime'].every((k) => k in e0) ? 'ok' : 'BAD SHAPE')
+    say('fs.mtimeIsEpochMs', e0 && typeof e0.mtime === 'number' && e0.mtime > 1e12 ? 'ok' : 'BAD (' + (e0 && e0.mtime) + ')')
+    say('fs.pathIsAbsolute', e0 && /^([A-Za-z]:[\\/]|\/)/.test(e0.path) ? 'ok' : 'BAD (' + (e0 && e0.path) + ')')
+
+    say('fs.rename', await api.local.rename(TMP + '/note.md', TMP + '/note2.md'))
+    say('fs.createDir.sub', await api.local.createDir(TMP + '/sub'))
+    say('fs.move', await api.local.move(TMP + '/note2.md', TMP + '/sub/note2.md'))
+    const rec = await api.local.readDirRecursive(TMP)
+    say('fs.readDirRecursive', (rec || []).map((e) => (e.isDir ? 'D:' : 'F:') + e.name).sort().join(',') || 'EMPTY')
+    say('fs.deleteFile', await api.local.deleteFile(TMP + '/sub/note2.md'))
+    say('fs.deleteRecursive', await api.local.deleteRecursive(TMP))
+    say('fs.cleanupExisted', !(await api.local.readDir(TMP).then(() => true).catch(() => false)) ? 'ok' : 'STILL THERE')
+  } catch (e) {
+    say('fs.ERROR', e.message)
+  }
+
+  /* ------------------------------------------------- 4. JSON store */
+  try {
+    await api.local.store.set('smoke.key', 'value-123')
+    say('store.roundtrip', (await api.local.store.get('smoke.key')) === 'value-123' ? 'ok' : 'MISMATCH')
+    await api.local.storeDelete('smoke.key')
+    say('store.delete', (await api.local.store.get('smoke.key')) === null ? 'ok' : 'NOT NULL')
+  } catch (e) { say('store.ERROR', e.message) }
+
+  /* --------------------------------------------- 5. recent vaults */
+  try {
+    const rv = await api.local.recentVaults()
+    say('recentVaults', Array.isArray(rv) ? 'array[' + rv.length + ']' : 'NOT ARRAY')
+  } catch (e) { say('recentVaults.ERROR', e.message) }
+
+  /* ------------------------------- 6. app:// protocol + SPA fallback */
+  try {
+    const r1 = await fetch('/index.html')
+    say('app.index', r1.status + ' ' + (r1.headers.get('content-type') || ''))
+    const r2 = await fetch('/app/deep/route-without-file')
+    const t2 = await r2.text()
+    say('app.spaFallback', r2.status === 200 && t2.toLowerCase().includes('<html') ? 'ok' : 'BAD (' + r2.status + ')')
+    const r3 = await fetch('/assets/definitely-missing-file.js')
+    say('app.missingAsset404', r3.status === 404 ? 'ok' : 'BAD (' + r3.status + ')')
+  } catch (e) { say('app.ERROR', e.message) }
+
+  /* -------------------------------- 7. app:// -> backend proxy */
+  try {
+    const res = await fetch('/api/health')
+    const body = await res.text()
+    let parsed = null
+    try { parsed = JSON.parse(body) } catch { /* not json */ }
+    say('proxy./api/health', res.status + (parsed ? ' json:ok=' + !!parsed.status : ' raw:' + body.slice(0, 80)))
+  } catch (e) { say('proxy.ERROR', e.message) }
+
+  /* ---------------------------------------- 8. window controls */
+  try {
+    say('win.isMaximized(before)', await api.window.isMaximized())
+    await api.window.maximize()
+    await new Promise((r) => setTimeout(r, 400))
+    say('win.isMaximized(afterMaximize)', await api.window.isMaximized())
+    await api.window.maximize() // toggles back
+    await new Promise((r) => setTimeout(r, 300))
+    say('win.isMaximized(afterRestore)', await api.window.isMaximized())
+  } catch (e) { say('win.ERROR', e.message) }
+
+  /* ---------------------------- 9. .md association (read-only!) */
+  try { say('isMdAssociated', await api.local.isMdAssociated()) }
+  catch (e) { say('isMdAssociated.ERROR', e.message) }
+
+  /* ------------------------------------------- 10. title + update */
+  try { await api.local.setTitle('smoke-title.md'); say('setTitle', 'sent') }
+  catch (e) { say('setTitle.ERROR', e.message) }
+
+  try { say('update.check', JSON.stringify(await api.local.update.check())) }
+  catch (e) { say('update.ERROR', e.message) }
+
+  /* --------------------------------------------------- report + exit */
+  const reportPath = info.paths.temp + '/neom-bridge-report.txt'
+  const summary = out.filter((l) => /BAD|MISSING|CORRUPTED|ERROR|MISMATCH|NOT /.test(l))
+  out.push('')
+  out.push(summary.length ? 'RESULT: FAIL (' + summary.length + ' problem(s))' : 'RESULT: PASS')
+  try { await api.local.writeFile(reportPath, out.join('\n')) ; say('report', reportPath) } catch (e) { say('report.ERROR', e.message) }
+  el.textContent = out.join('\n')
+  setTimeout(() => api.window.close(), 500)
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  main().catch((e) => {
+    say('FATAL', e && e.stack ? e.stack : String(e))
+    setTimeout(() => window.neom.window.close(), 500)
+  })
+})
+</script>
+</body>
+</html>

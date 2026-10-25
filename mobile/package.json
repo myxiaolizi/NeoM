@@ -1,0 +1,37 @@
+{
+  "name": "neom-mobile",
+  "productName": "NeoM",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NeoM mobile client (Capacitor) — Android / iOS",
+  "license": "MIT",
+  "scripts": {
+    "prepare:web": "node prepare-web.mjs",
+    "sync": "node prepare-web.mjs && cap sync",
+    "copy": "node prepare-web.mjs && cap copy",
+    "open:android": "cap open android",
+    "open:ios": "cap open ios",
+    "add:android": "cap add android",
+    "add:ios": "cap add ios",
+    "build:apk": "npm run sync && cd android && ./gradlew assembleDebug",
+    "build:apk:release": "npm run sync && cd android && ./gradlew assembleRelease",
+    "build:aab": "npm run sync && cd android && ./gradlew bundleRelease",
+    "build:ios": "npm run sync && cap build ios --scheme App --configuration Release"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/filesystem": "^6.0.1",
+    "@capacitor/haptics": "^6.0.1",
+    "@capacitor/ios": "^6.1.2",
+    "@capacitor/keyboard": "^6.0.1",
+    "@capacitor/share": "^6.0.2",
+    "@capacitor/splash-screen": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "typescript": "^5.6.2"
+  }
+}

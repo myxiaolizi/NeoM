@@ -1,0 +1,34 @@
+{
+  "name": "neom-desktop",
+  "productName": "NeoM",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NeoM desktop client (Electron) — Windows / macOS / Linux",
+  "author": {
+    "name": "NeoM",
+    "email": "hi@zhengl.vip"
+  },
+  "homepage": "https://m.zhengl.vip",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "prepare:web": "node prepare-web.mjs",
+    "dev": "node prepare-web.mjs --dev && electron .",
+    "start": "electron .",
+    "icons": "node ../scripts/make-icons.mjs",
+    "pack:dir": "node prepare-web.mjs && electron-builder --config builder.config.js --dir",
+    "build:win": "node prepare-web.mjs && electron-builder --config builder.config.js --win --x64",
+    "build:win:nsis": "node prepare-web.mjs && electron-builder --config builder.config.js --win nsis --x64",
+    "build:win:zip": "node prepare-web.mjs && electron-builder --config builder.config.js --win zip --x64",
+    "build:mac": "node prepare-web.mjs && electron-builder --config builder.config.js --mac",
+    "build:mac:arm64": "node prepare-web.mjs && electron-builder --config builder.config.js --mac --arm64",
+    "build:linux": "node prepare-web.mjs && electron-builder --config builder.config.js --linux --x64"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
