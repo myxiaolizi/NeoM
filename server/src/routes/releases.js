@@ -108,8 +108,47 @@ router.get(
     const id = Number(req.params.id);
     const row = await one('SELECT * FROM releases WHERE id=?', [id]);
     if (!row) throw bad('安装包不存在', 'NOT_FOUND');
+    if (!row.url && !row.oss_key) throw bad('该平台安装包尚未发布', 'NOT_PUBLISHED');
+
     await execute('UPDATE releases SET downloads=downloads+1 WHERE id=?', [id]);
+
+    /**
+     * The bucket is PRIVATE. Direct OSS redirects are unreliable here:
+     *  - the custom domain is a relay that breaks OSS signatures (403), and
+     *  - the raw endpoint rejects .apk delivery (Aliyun ApkDownloadForbidden,
+     *    even with a signed response-content-disposition override).
+     * So .apk always streams through the server-proxied /api/storage/raw
+     * route; other objects use the signed raw-endpoint URL.
+     */
+    if (row.oss_key) {
+      if (/\.apk$/i.test(row.oss_key)) {
+        const { rawProxyUrl } = await import('../lib/storage.js');
+        return res.redirect(302, rawProxyUrl(row.oss_key, 3600));
+      }
+      try {
+        const { signUrl } = await import('../lib/storage.js');
+        const signed = await signUrl(row.oss_key, null, 3600);
+        if (signed) return res.redirect(302, signed);
+      } catch { /* fall through to proxy */ }
+      const { rawProxyUrl } = await import('../lib/storage.js');
+      return res.redirect(302, rawProxyUrl(row.oss_key, 3600));
+    }
+    if (!row.url) throw bad('该平台安装包尚未发布', 'NOT_PUBLISHED');
     return res.redirect(302, row.url);
+  })
+);
+
+/** Download by platform (convenience: /api/releases/latest/win-x64/download). */
+router.get(
+  '/latest/:platform/download',
+  asyncH(async (req, res) => {
+    const platform = String(req.params.platform || '');
+    const row = await one(
+      "SELECT * FROM releases WHERE platform=? AND channel='stable' ORDER BY published_at DESC LIMIT 1",
+      [platform]
+    );
+    if (!row) throw bad('该平台安装包尚未发布', 'NOT_FOUND');
+    return res.redirect(302, `/api/releases/${row.id}/download`);
   })
 );
 

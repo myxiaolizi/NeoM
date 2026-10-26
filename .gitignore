@@ -1,20 +1,41 @@
+# dependencies
 node_modules/
+
+# build output
 dist/
 dist-ssr/
 release/
 desktop/out/
 desktop/dist/
-mobile/android/
-mobile/ios/
-*.local
+desktop/app-web/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/keystore.properties
+mobile/android/*.keystore
+mobile/android/*.jks
+mobile/ios/App/Pods/
+mobile/ios/App/build/
+mobile/ios/DerivedData/
+mobile/ios/App/App/public/
+mobile/ios/App/App.xcworkspace/
+mobile/ios/App/App.xcodeproj/xcuserdata/
+mobile/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+
+# secrets — never commit
 .env
 .env.*
 !.env.example
+.deploy-credentials.txt
+
+# local / OS files
+*.local
 *.log
 .DS_Store
 Thumbs.db
-.deploy-credentials.txt
-.deploy-stage/
+.idea/
+.vscode/
 uploads/
 tmp/
 server/data/
@@ -22,20 +43,24 @@ coverage/
 .vite/
 *.tsbuildinfo
 legacy/
-
-# scratch
-server/_deploy.mjs
-scripts/probe-console.mjs
-scripts/shot.mjs
-scripts/shot-auth.mjs
 .shots/
 
--outPath
--*
-
+# scratch scripts
+server/_deploy.mjs
 server/_up.mjs
 server/_rel.mjs
-server/_deploy.mjs
 server/_shotauth.mjs
 server/_probe.mjs
 server/_shot.mjs
+scripts/probe-console.mjs
+scripts/shot.mjs
+scripts/shot-auth.mjs
+
+# cross-machine handoff package (contains secrets + full session transcripts)
+HANDOFF/
+
+# deploy staging & one-off generators
+.deploy-stage/
+server/_gen-handoff-urls.mjs
+server/_list-handoff.mjs
+login.json

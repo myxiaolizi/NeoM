@@ -4,6 +4,7 @@
  */
 import { Router } from 'express';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import multer from 'multer';
 import { query, execute, one } from '../lib/db.js';
 import { requireAuth } from '../lib/auth.js';
@@ -78,6 +79,58 @@ function settingsOut(row) {
   };
 }
 
+
+/* -------------------------------------------------------------------------- */
+/*  Proxied object download  GET /api/storage/raw/:key?t=<hmac>&e=<expires>   */
+/*  Fallback channel when direct OSS access is impossible (the custom domain  */
+/*  is a relay that breaks OSS signatures; the raw endpoint refuses .apk).    */
+/*  HMAC token authorizes the exact key until expiry; no login needed so      */
+/*  <img>/<a> tags and 302 redirects can use it. Declared BEFORE the          */
+/*  router-level requireAuth guard that follows this block.                   */
+/* -------------------------------------------------------------------------- */
+const RAW_TTL = 7 * 24 * 3600;
+
+/** HMAC token that authorizes GET /api/storage/raw/:key until expires. */
+function rawTokenFor(key, expires) {
+  return crypto.createHmac('sha256', env.jwtSecret).update(`raw:${key}:${expires}`).digest('base64url');
+}
+export { rawTokenFor };
+
+router.get(
+  '/raw/:key(*)',
+  asyncH(async (req, res) => {
+    const key = safePath(String(req.params.key || ''));
+    const expires = Math.max(60, Number(req.query.e) || 0);
+    if (!expires || expires < Math.floor(Date.now() / 1000)) {
+      throw new ApiError('链接已过期', 403, 'LINK_EXPIRED');
+    }
+    const expect = rawTokenFor(key, expires);
+    const got = String(req.query.t || '');
+    let okSig = false;
+    try {
+      okSig = expect.length === got.length &&
+        crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(got));
+    } catch { okSig = false; }
+    if (!okSig) throw new ApiError('签名无效', 403, 'BAD_SIGNATURE');
+
+    const storage = await import('../lib/storage.js');
+    const obj = await storage.getObject(key, null);
+    if (!obj) throw new ApiError('对象不存在', 404, 'NOT_FOUND');
+
+    if (obj.local) {
+      res.setHeader('Content-Type', obj.contentType || mimeOf(key));
+      return res.send(obj.content);
+    }
+    res.setHeader('Content-Type', obj.contentType || mimeOf(key));
+    if (/\.apk$/i.test(key)) {
+      res.setHeader('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
+    }
+    res.setHeader('Cache-Control', 'private, max-age=600');
+    return res.send(obj.content);
+  })
+);
+
+/* ----------------- authenticated storage endpoints ------------------------ */
 router.use(requireAuth);
 
 /* -------------------------------- settings -------------------------------- */
@@ -209,7 +262,13 @@ router.post(
     const name = `${stamp}-${base || 'file'}`;
     const key = userKindKey(req.user.username, kind, name);
     const put = await putObject(key, req.file.buffer, mimeOf(base), req.user);
-    const url = await signUrl(key, req.user, 7 * 24 * 3600).catch(() => publicUrl(key));
+    let url = await signUrl(key, req.user, 7 * 24 * 3600).catch(() => publicUrl(key));
+    // apk is refused on the raw endpoint and the custom domain breaks
+    // signatures, so hand back our own proxied URL for those cases
+    if (/\.apk$/i.test(key) || !url.includes(String(process.env.OSS_BUCKET || '\u0000'))) {
+      const e = Math.floor(Date.now() / 1000) + RAW_TTL;
+      url = `${env.publicBase}/api/storage/raw/${key.split('/').map(encodeURIComponent).join('/')}?t=${rawTokenFor(key, e)}&e=${e}`;
+    }
     return ok(res, { url, key, size: req.file.size, name: base, kind, etag: put.etag || null }, '上传成功');
   })
 );
@@ -226,7 +285,10 @@ router.post(
     }
     const expires = Math.min(7 * 24 * 3600, Math.max(60, Number((req.body || {}).expires) || 3600));
     const url = await signUrl(key, req.user, expires);
-    return ok(res, { url, key, expires });
+    // proxy fallback that never depends on OSS-side signature verification
+    const e = Math.floor(Date.now() / 1000) + RAW_TTL;
+    const proxy = `/api/storage/raw/${key.split('/').map(encodeURIComponent).join('/')}?t=${rawTokenFor(key, e)}&e=${e}`;
+    return ok(res, { url, proxy, key, expires });
   })
 );
 

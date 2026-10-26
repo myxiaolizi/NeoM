@@ -9,6 +9,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import OSS from 'ali-oss';
 import { one } from './db.js';
 import { env, SERVER_ROOT, ApiError, bad, decryptSecret, safePath } from './util.js';
@@ -244,15 +245,32 @@ export async function listObjects(prefix, user = null, { max = 5000 } = {}) {
   return out;
 }
 
-/** Signed GET url (private read). Falls back to a direct URL when unsigned content is public. */
+/**
+ * Signed GET url (private read).
+ *
+ * NOTE on the system bucket: `mdadmin.zhengl.vip` is NOT a real OSS CNAME — it
+ * resolves to a third-party relay (8.138.53.26) that forwards to OSS. Signing
+ * over that host produces SignatureDoesNotMatch because OSS validates the
+ * signature against the Host it receives (the relay's domain), not ours. The
+ * raw bucket endpoint signs correctly — but Aliyun forbids serving `.apk` from
+ * the raw *default* endpoint domain (ApkDownloadForbidden), which we bypass
+ * with response-content-disposition (attachment download). Images/documents
+ * GET fine over raw.
+ */
 export async function signUrl(key, user = null, expires = 3600) {
   if (!ossConfigured() && (!user || !(await getUserStorageConfig(user.id)))) {
     return `${env.publicBase}/api/storage/local/${encodeURIComponent(key)}`;
   }
   const resolved = await clientFor(user);
-  const useCname = !resolved.personal && Boolean(env.oss.domain);
-  const client = useCname ? publicClient(true) : resolved.client;
-  const url = client.signatureUrl(key, { expires, method: 'GET' });
+  const client = resolved.personal ? resolved.client : publicClient(false);
+  const opts = { expires, method: 'GET' };
+  // raw default endpoint + apk => force attachment download to satisfy Aliyun
+  // policy; a browser then saves the file instead of failing with a 400 page.
+  if (!resolved.personal && /\.apk$/i.test(key)) {
+    const name = key.split('/').pop();
+    opts.response = { 'content-disposition': `attachment; filename="${name}"` };
+  }
+  const url = client.signatureUrl(key, opts);
   return url.replace(/^http:\/\//, 'https://');
 }
 
@@ -260,6 +278,29 @@ export async function signUrl(key, user = null, expires = 3600) {
 export function publicUrl(key) {
   if (env.oss.domain) return `${env.oss.domain}/${key}`;
   return `https://${env.oss.bucket}.${env.oss.endpoint}/${key}`;
+}
+
+/**
+ * Server-side proxied download URL: streams an object to the client through
+ * the API host (GET /api/storage/raw/:key?t=<hmac>&e=<expires> in routes/
+ * storage.js). Used as fallback when direct OSS access is impossible (e.g.
+ * the custom domain is a relay that breaks signatures, or the raw endpoint
+ * refuses apk delivery).
+ */
+export function rawProxyUrl(key, expires = 3600) {
+  const e = Math.floor(Date.now() / 1000) + expires;
+  const token = crypto.createHmac('sha256', env.jwtSecret).update(`raw:${key}:${e}`).digest('base64url');
+  return `${env.publicBase}/api/storage/raw/${key.split('/').map(encodeURIComponent).join('/')}?t=${encodeURIComponent(token)}&e=${e}`;
+}
+
+/**
+ * Server-side proxied download: streams an object to the client through the
+ * API host. Used as fallback when direct OSS access is not possible (e.g. the
+ * custom domain is a relay that breaks signatures). Requires an admin-signed
+ * token; callers hand out this URL instead of an OSS url.
+ */
+export function proxiedUrl(key, token, expires = 3600) {
+  return `${env.publicBase}/api/storage/raw/${encodeURIComponent(key)}?t=${encodeURIComponent(token)}&e=${expires}`;
 }
 
 /** Total bytes stored under a prefix. */
